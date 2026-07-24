@@ -2,27 +2,10 @@
 VHLog is a lightweight C++ 23 async log library.
 
 ### Cloning VHLog
-You can clone the repository as usual with one the following commands (CodeBerg is preferable):
-```bash
-$ git clone https://codeberg.org/mrtscllfr/VHLog.git
-```
+You can clone the repository as usual:
 
 ```bash
 $ git clone https://github.com/martuscellifaria/VHLog.git
-```
-
-However, if you need to activate the TCP sink option, you can clone it with submodules: 
-```bash
-$ git clone --recurse-submodules https://codeberg.org/mrtscllfr/VHLog.git
-```
-
-```bash
-$ git clone --recurse-submodules https://github.com/martuscellifaria/VHLog.git
-```
-
-If you cloned with the first option, you can later use the following command:
-```bash
-$ git sumodule update --init
 ```
 
 ### Embedding VHLog on your project
@@ -50,18 +33,12 @@ $ cd build
 $ cmake ..
 ```
 
-### TCP Sink compile option
-If you want to enable support for TCP Log Sink, you will have to activate the asio compilation. First ensure you have the asio library inside the third_party directory. Then you can set the following flag on your build with cmake:
-```bash
-$ cmake .. -DUSE_ASIO=ON
-```
-
-You can take the buildscript.sh file as example, there is the flag for enabling compilation with asio disabled by default.
+You can take the buildscript.sh file as example.
 ```bash
 $ cat buildscript.sh
 mkdir build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_ASIO=OFF
+cmake .. -DCMAKE_BUILD_TYPE=Release -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ninja
 ln -sf build/compile_commands.json ../
 ```
@@ -86,7 +63,7 @@ int main() {
 ```
 
 ### Available sinks
-Up to this point, VHLog has a console sink, a rotating file sink, a TCP sink and a null sink. Multi-sink is also possible, if you call addLogSink multiple times.
+Up to this point, VHLog has a console sink, a rotating file sink and a null sink. Multi-sink is also possible, if you call addLogSink multiple times.
 
 ### Log levels
 The available log levels are DEBUG, INFO, WARNING, ERROR, FATAL. Debug level messages can be filtered out by passing a boolean with value false onto the VHLogger constructor. The default constructor has it set to true, so debug level messages are active by default.
@@ -95,7 +72,7 @@ The available log levels are DEBUG, INFO, WARNING, ERROR, FATAL. Debug level mes
 You can also compile the benchmarking binary VHLogBench by passing -DVHLOG_BENCHMARK=ON to your cmake command:
 
 ```bash
-$ cmake .. -DCMAKE_BUILD_TYPE=Release -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_ASIO=ON -DVHLOG_BENCHMARK=ON
+$ cmake .. -DCMAKE_BUILD_TYPE=Release -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DVHLOG_BENCHMARK=ON
 ```
 
 If you build the benchmarking binary with asio, please do not forget to start a server before running VHLogBench.
@@ -170,9 +147,5 @@ Memory: 784MiB / 31772MiB
 
 The results show consistency among different architectures.
 
-### Next plans
-- Add support to gRPC, OPC UA, MQTT and Grafana.
-
 ### VHLog Name
 VHLog is named after Vladimir Herzog, a brazilian journalist murdered by the military dictatorship in the year of 1975.
-
