@@ -1,27 +1,26 @@
-#include "VHLog.h"
+#include "AhoiLog.h"
 #include <chrono>
 #include <cstddef>
 #include <ctime>
 #include <iostream>
-#include <mutex>
 #include <format>
 #include <print>
 #include <string>
 
-VHLog::VHLog(bool debug_environment, std::size_t batch_size) : 
-    base_path_and_name_("") {
+AhoiLog::AhoiLog(bool debug_environment, std::size_t batch_size) : 
+    base_path_and_name_(""),
+    ahoilog_shutdown_(false) {
     worker_running_ = true;
     batch_size_ = batch_size;
     unflushed_bytes_ = 0;
     debug_environment_ = debug_environment;
     sink_types_.clear();
-    logger_thread_ = std::thread(&VHLog::logger_worker, this);
+    logger_thread_ = std::thread(&AhoiLog::logger_worker, this);
 }
 
-void VHLog::shutdown() {
-
+void AhoiLog::shutdown() {
+    ahoilog_shutdown_ = true;
     worker_running_ = false;
-    
     cond_var_.notify_all();
     
     if (logger_thread_.joinable()) {
@@ -32,19 +31,17 @@ void VHLog::shutdown() {
         file_.flush();
         file_.close();
     }
-    vhlog_shutdown_ = true;
 }
 
-VHLog::~VHLog() {
-
-    if (!vhlog_shutdown_) {
+AhoiLog::~AhoiLog() {
+    if (!ahoilog_shutdown_) {
         shutdown();
     }
 }
 
-void VHLog::logger_worker() {
+void AhoiLog::logger_worker() {
 
-    std::vector<std::pair<VHLogLevel, std::string>> batch;
+    std::vector<std::pair<AhoiLogLevel, std::string>> batch;
     
     while (true) {
         std::unique_lock<std::mutex> lock(queue_mutex_);
@@ -88,17 +85,16 @@ void VHLog::logger_worker() {
     }
 }
 
-void VHLog::add_console_sink() {
+void AhoiLog::add_console_sink() {
     
     std::lock_guard<std::mutex> lock(mutex_);
-    append_new_sink(VHLogSinkType::ConsoleSink);
+    append_new_sink(AhoiLogSinkType::ConsoleSink);
 }
 
 
-void VHLog::add_file_sink(const std::string& base_path_and_name, std::size_t max_size) {
-
+void AhoiLog::add_file_sink(const std::string& base_path_and_name, std::size_t max_size) {
     std::lock_guard<std::mutex> lock(mutex_);
-    append_new_sink(VHLogSinkType::FileSink);
+    append_new_sink(AhoiLogSinkType::FileSink);
     
     if (base_path_and_name_ == "") {
         base_path_and_name_ = base_path_and_name;
@@ -111,11 +107,12 @@ void VHLog::add_file_sink(const std::string& base_path_and_name, std::size_t max
     max_size_ = max_size;
     current_size_ = 0;
     
-    auto now = std::chrono::system_clock::now();
-    auto now_sec = std::chrono::floor<std::chrono::seconds>(now);
-    auto zt = std::chrono::zoned_time(std::chrono::current_zone(), now_sec);
-    current_date_ = std::format("{:%Y-%m-%d}", zt);
-    std::string file_name = std::format("{}_{:%Y-%m-%d_%H-%M:%S}.log", base_path_and_name_, zt);
+    current_date_ = get_current_date();
+
+    auto now = std::chrono::zoned_time(
+	std::chrono::current_zone(),
+	std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+    std::string file_name = std::format("{}_{:%Y-%m-%d_%H-%M:%S}.log", base_path_and_name_, now);
 
 
     file_.open(file_name, std::ios::app);
@@ -124,8 +121,7 @@ void VHLog::add_file_sink(const std::string& base_path_and_name, std::size_t max
     }
 }
 
-void VHLog::rotate_file_sink() {
-   
+void AhoiLog::rotate_file_sink() {
     std::lock_guard<std::mutex> lock(file_mutex_);
     if (file_ && file_.is_open()) {
         file_.flush();
@@ -135,92 +131,103 @@ void VHLog::rotate_file_sink() {
     current_size_ = 0;
     unflushed_bytes_ = 0;
 
-    auto now = std::chrono::system_clock::now();
-    auto now_sec = std::chrono::floor<std::chrono::seconds>(now);
-    auto zt = std::chrono::zoned_time(std::chrono::current_zone(), now_sec);
-    current_date_ = std::format("{:%Y-%m-%d}", zt);
-    std::string file_name = std::format("{}_{:%Y-%m-%d_%H-%M:%S}.log", base_path_and_name_, zt);
-
+    current_date_ = get_current_date();
+    auto now = std::chrono::zoned_time(
+	std::chrono::current_zone(),
+	std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+    std::string file_name = std::format("{}_{:%Y-%m-%d_%H-%M:%S}.log", base_path_and_name_, now);
     file_.open(file_name, std::ios::app);
     if (!file_) {
         std::println("Failed to open/create log file: {}", file_name);
     }
 }
 
-void VHLog::add_null_sink() {
+void AhoiLog::add_null_sink() {
     
     std::lock_guard<std::mutex> lock(mutex_);
-    append_new_sink(VHLogSinkType::NullSink);
+    append_new_sink(AhoiLogSinkType::NullSink);
 }
 
-void VHLog::log(VHLogLevel level, std::string_view message) {
-    
-    if (level != VHLogLevel::DEBUG || debug_environment_) {
+void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
+    if (ahoilog_shutdown_) return;
+    if (level != AhoiLogLevel::DEBUG || debug_environment_) {
+	std::string owned(message);
         std::lock_guard<std::mutex> lock(queue_mutex_);
-        log_message_queue_.emplace_back(level, std::string(message));
+        log_message_queue_.emplace_back(level, std::move(owned));
         cond_var_.notify_one();
     }
 }
 
-void VHLog::write_to_destination(VHLogLevel level, const std::string& message) {
-    auto now = std::chrono::system_clock::now();
-    auto now_sec = std::chrono::floor<std::chrono::seconds>(now);
-    auto zt = std::chrono::zoned_time(std::chrono::current_zone(), now_sec);
-
+void AhoiLog::write_to_destination(AhoiLogLevel level, const std::string& message) {
     static constexpr const char* levels[] = {
         "DEBUG", "INFO", "WARNING", "ERROR", "FATAL", "UNKNOWN"
     };
 
     const char* level_string = levels[std::min(static_cast<int>(level), 5)];
-    std::string composed_message = std::format("[{:%Y-%m-%d_%H-%M:%S}] [{}] {}\n",
-                                             zt, 
-                                             level_string, 
-                                             message);
-    
+    std::string composed_message = std::format("[{}] [{}] {}\n",
+	get_timestamp(), 
+	level_string, 
+	message);
     for (const auto& sink_type : sink_types_) {
         switch (sink_type) {
-            case VHLogSinkType::FileSink:
+            case AhoiLogSinkType::FileSink:
                 {
                     if (file_ && file_.is_open()) {
                         file_ << composed_message;
                         current_size_ += composed_message.size();
                         unflushed_bytes_ += composed_message.size();
-                        bool b_should_flush = false;
+                        bool should_flush = false;
                         if (unflushed_bytes_ >= FLUSH_THRESHOLD) {
-                            b_should_flush = true;
+                            should_flush = true;
                         }
-                        else if (level == VHLogLevel::FATAL || level == VHLogLevel::ERROR) {
-                            b_should_flush = true;
+                        else if (level == AhoiLogLevel::FATAL || 
+				level == AhoiLogLevel::ERROR ||
+				level == AhoiLogLevel::WARNING) {
+                            should_flush = true;
                         }
                         else if (should_rotate(composed_message.size())) {
-                            b_should_flush = true;
+                            should_flush = true;
                             rotate_file_sink();
                         }
-                        if (b_should_flush) {
+                        if (should_flush) {
                             file_.flush();
                             unflushed_bytes_ = 0;
                         }
                     }
                 }
                 break;
-            case VHLogSinkType::ConsoleSink:
+            case AhoiLogSinkType::ConsoleSink:
                 std::print("{}", composed_message);
                 break;
-            case VHLogSinkType::NullSink:
+            case AhoiLogSinkType::NullSink:
                 break;
         }
     }
 }
 
-bool VHLog::should_rotate(std::size_t message_size) {
+bool AhoiLog::should_rotate(std::size_t message_size) {
     if (current_size_ + message_size > max_size_) {
         return true;
     }
-    auto now = std::chrono::system_clock::now();
-    std::string current_date = std::format("{:%Y-%m-%d}", now);
-    
-    if (current_date != current_date_) {
-        return true;
+    return get_current_date() != current_date_;
+}
+
+const std::string& AhoiLog::get_timestamp() {
+    auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    if (now != last_timestamp_sec_) {
+        last_timestamp_sec_ = now;
+        cached_timestamp_ = std::format("{:%Y-%m-%d_%H-%M:%S}", 
+            std::chrono::zoned_time(std::chrono::current_zone(), now));
     }
-    return false;
+    return cached_timestamp_;
+}
+
+std::chrono::year_month_day AhoiLog::get_current_date() const {
+    auto now = std::chrono::floor<std::chrono::days>(
+        std::chrono::zoned_time(
+            std::chrono::current_zone(),
+            std::chrono::system_clock::now()
+        ).get_local_time()
+    );
+    return std::chrono::year_month_day{now};
 }

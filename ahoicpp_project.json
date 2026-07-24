@@ -1,0 +1,9 @@
+{
+	"project_name": "example",
+	"build_path": "./build/App/",
+	"execution_path": "./build/App/",
+	"build_as": "release",
+	"version": "99.99.99",
+	"company": "Ahoi Labs",
+	"description": "Your project is owned by Ahoi Labs"
+}

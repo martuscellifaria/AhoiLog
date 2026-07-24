@@ -1,28 +1,52 @@
 cmake_minimum_required(VERSION 3.28)
-project(VHLog)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-if(WIN32)
-    set (CMAKE_SYSTEM_VERSION 10.0)
-    file(GLOB all_SRCS
-            "${PROJECT_SOURCE_DIR}/include/*.h"
-            "${PROJECT_SOURCE_DIR}/src/*.cpp"
-            "${PROJECT_SOURCE_DIR}/examples/*.cpp"
-            )
-    add_executable(VHLog ${all_SRCS})
-    set_property(TARGET VHLog PROPERTY CXX_STANDARD 23)
-    target_include_directories(VHLog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(DEFINED VERSION_ARG)
+    set(PROJECT_VERSION ${VERSION_ARG})
 else()
-    file(GLOB all_SRCS
-            "${PROJECT_SOURCE_DIR}/include/*.h"
-            "${PROJECT_SOURCE_DIR}/src/*.cpp"
-            "${PROJECT_SOURCE_DIR}/examples/*.cpp"
-    )
-
-    add_executable(VHLog ${all_SRCS})
-    target_include_directories(VHLog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    set_property(TARGET VHLog PROPERTY CXX_STANDARD 23)
+    set(PROJECT_VERSION "99.99.99") 
 endif()
+if(DEFINED COMPANY_ARG)
+	set(PROJECT_COMPANY ${COMPANY_ARG})
+else()
+	set(PROJECT_COMPANY "Ahoi Labs") 
+endif()
+if(DEFINED DESCRIPTION_ARG)
+	set(PROJECT_DESCRIPTION ${DESCRIPTION_ARG})
+else()
+	set(PROJECT_DESCRIPTION "Your project is owned by Ahoi Labs") 
+endif()
+
+project(example VERSION ${PROJECT_VERSION})
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(VER_MAJOR ${PROJECT_VERSION_MAJOR})
+set(VER_MINOR ${PROJECT_VERSION_MINOR})
+set(VER_PATCH ${PROJECT_VERSION_PATCH})
+set(VERSION ${PROJECT_VERSION})
+set(COMPANY ${PROJECT_COMPANY})
+set(DESCRIPTION ${PROJECT_DESCRIPTION})
+set(PRODUCT ${PROJECT_NAME})
+string(TIMESTAMP COPYRIGHT_YEAR "%Y")
+set(COPYRIGHT "Copyright ${COPYRIGHT_YEAR}")
+
+string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)
+string(TIMESTAMP BUILD_DATE "%Y%m%d")
+
+include(AhoiCppProject.cmake)
+include(AhoiCppExternals.cmake)
+add_library(ahoicpp_externals INTERFACE)
+
+foreach(PATH ${AHOICPP_EXTERNALS_INCLUDE_PATHS})
+    file(GLOB EXPANDED_PATHS ${PATH})
+    foreach(EXPANDED ${EXPANDED_PATHS})
+        if(IS_DIRECTORY ${EXPANDED})
+            target_include_directories(ahoicpp_externals INTERFACE ${EXPANDED})
+        endif()
+    endforeach()
+    if(NOT PATH MATCHES "\\*")
+        if(EXISTS ${PATH})
+            target_include_directories(ahoicpp_externals INTERFACE ${PATH})
+        endif()
+    endif()
+endforeach()
+add_subdirectory(App)
 
