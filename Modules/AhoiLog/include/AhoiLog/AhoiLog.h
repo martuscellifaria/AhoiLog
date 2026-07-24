@@ -28,8 +28,8 @@ public:
     virtual ~AhoiLog();
 
     static AhoiLog& instance() {
-	static AhoiLog logger;
-	return logger;
+        static AhoiLog logger;
+        return logger;
     }
 private:
     enum class AhoiLogSinkType {
@@ -42,17 +42,22 @@ public:
     void add_console_sink();
     void add_file_sink(const std::string& base_path_and_name = "", std::size_t max_size = 1024*1024);
     void add_null_sink();
+
     template<typename... Args>
     void log(AhoiLogLevel level, std::format_string<Args...> fmt, Args&&... args) {
-	if (ahoilog_shutdown_) return;
-	if (level != AhoiLogLevel::DEBUG || debug_environment_) {
-	    auto formatted = std::format(fmt, std::forward<Args>(args)...);
-	    std::lock_guard<std::mutex> lock(queue_mutex_);
-	    log_message_queue_.emplace_back(level, std::move(formatted));
-	    cond_var_.notify_one();
-	}
+        if (ahoilog_shutdown_) return;
+        if (level != AhoiLogLevel::DEBUG || debug_environment_) {
+            auto formatted = std::format(fmt, std::forward<Args>(args)...);
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            log_message_queue_.emplace_back(level, std::move(formatted));
+            cond_var_.notify_one();
+        }
     }
+
     void log(AhoiLogLevel level, const std::string_view message);
+    static std::string where_am_i(std::source_location loc = std::source_location::current()) {
+        return std::format("[{}:{}]", loc.file_name(), loc.line());
+    }
 
 private:
     void write_to_destination(AhoiLogLevel level, const std::string& message);

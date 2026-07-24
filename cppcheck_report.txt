@@ -1,5 +1,0 @@
-src/VHLog.cpp:272:44: style: Unused variable: received [unusedVariable]
-        std::pair<VHLogLevel, std::string> received;
-                                           ^
-nofile:0:0: information: Active checkers: 169/966 (use --checkers-report=<filename> to see details) [checkersReport]
-

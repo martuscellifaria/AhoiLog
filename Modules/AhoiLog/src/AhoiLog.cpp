@@ -22,7 +22,7 @@ void AhoiLog::shutdown() {
     ahoilog_shutdown_ = true;
     worker_running_ = false;
     cond_var_.notify_all();
-    
+
     if (logger_thread_.joinable()) {
         logger_thread_.join();
     }
@@ -40,57 +40,38 @@ AhoiLog::~AhoiLog() {
 }
 
 void AhoiLog::logger_worker() {
-
     std::vector<std::pair<AhoiLogLevel, std::string>> batch;
-    
     while (true) {
         std::unique_lock<std::mutex> lock(queue_mutex_);
-        
         cond_var_.wait(lock, [this]() {
             return !log_message_queue_.empty() || !worker_running_;
         });
-        
+
         if (!worker_running_ && log_message_queue_.empty()) {
             break;
         }
-        
+
         const size_t available = log_message_queue_.size();
         const size_t batch_size = std::min(available, static_cast<size_t>(batch_size_));
-        
         batch.reserve(batch_size);
-        
         for (size_t i = 0; i < batch_size; ++i) {
             batch.emplace_back(std::move(log_message_queue_.front()));
             log_message_queue_.pop_front();
         }
-        
         lock.unlock(); 
-        
         for (auto& [level, message] : batch) {
             if (!message.empty()) { 
                 write_to_destination(level, message);
             }
         }
-        
         batch.clear();
-    }
-    
-    std::unique_lock<std::mutex> lock(queue_mutex_);
-    while (!log_message_queue_.empty()) {
-        auto& [level, message] = log_message_queue_.front();
-        if (!message.empty()) {
-            write_to_destination(level, message);
-        }
-        log_message_queue_.pop_front();
     }
 }
 
 void AhoiLog::add_console_sink() {
-    
     std::lock_guard<std::mutex> lock(mutex_);
     append_new_sink(AhoiLogSinkType::ConsoleSink);
 }
-
 
 void AhoiLog::add_file_sink(const std::string& base_path_and_name, std::size_t max_size) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -110,10 +91,9 @@ void AhoiLog::add_file_sink(const std::string& base_path_and_name, std::size_t m
     current_date_ = get_current_date();
 
     auto now = std::chrono::zoned_time(
-	std::chrono::current_zone(),
-	std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+        std::chrono::current_zone(),
+        std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
     std::string file_name = std::format("{}_{:%Y-%m-%d_%H-%M:%S}.log", base_path_and_name_, now);
-
 
     file_.open(file_name, std::ios::app);
     if (!file_) {
@@ -133,8 +113,8 @@ void AhoiLog::rotate_file_sink() {
 
     current_date_ = get_current_date();
     auto now = std::chrono::zoned_time(
-	std::chrono::current_zone(),
-	std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+        std::chrono::current_zone(),
+        std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
     std::string file_name = std::format("{}_{:%Y-%m-%d_%H-%M:%S}.log", base_path_and_name_, now);
     file_.open(file_name, std::ios::app);
     if (!file_) {
@@ -143,7 +123,6 @@ void AhoiLog::rotate_file_sink() {
 }
 
 void AhoiLog::add_null_sink() {
-    
     std::lock_guard<std::mutex> lock(mutex_);
     append_new_sink(AhoiLogSinkType::NullSink);
 }
@@ -151,7 +130,7 @@ void AhoiLog::add_null_sink() {
 void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
     if (ahoilog_shutdown_) return;
     if (level != AhoiLogLevel::DEBUG || debug_environment_) {
-	std::string owned(message);
+        std::string owned(message);
         std::lock_guard<std::mutex> lock(queue_mutex_);
         log_message_queue_.emplace_back(level, std::move(owned));
         cond_var_.notify_one();
@@ -164,10 +143,9 @@ void AhoiLog::write_to_destination(AhoiLogLevel level, const std::string& messag
     };
 
     const char* level_string = levels[std::min(static_cast<int>(level), 5)];
-    std::string composed_message = std::format("[{}] [{}] {}\n",
-	get_timestamp(), 
-	level_string, 
-	message);
+    std::string composed_message = std::format("[{}] [{}] {}\n", get_timestamp(), 
+            level_string, 
+            message);
     for (const auto& sink_type : sink_types_) {
         switch (sink_type) {
             case AhoiLogSinkType::FileSink:
@@ -181,8 +159,8 @@ void AhoiLog::write_to_destination(AhoiLogLevel level, const std::string& messag
                             should_flush = true;
                         }
                         else if (level == AhoiLogLevel::FATAL || 
-				level == AhoiLogLevel::ERROR ||
-				level == AhoiLogLevel::WARNING) {
+                                level == AhoiLogLevel::ERROR || 
+                                level == AhoiLogLevel::WARNING) {
                             should_flush = true;
                         }
                         else if (should_rotate(composed_message.size())) {
