@@ -24,20 +24,16 @@ enum class AhoiLogLevel {
 class AhoiLog {
 public:
     explicit AhoiLog(bool debug_environment = true, std::size_t batch_size = 1);
+    virtual ~AhoiLog() noexcept;
+    AhoiLog(const AhoiLog&) = delete;
+    AhoiLog& operator=(const AhoiLog&) = delete;
     void shutdown();
-    virtual ~AhoiLog();
-
-    static AhoiLog& instance() {
-        static AhoiLog logger;
-        return logger;
-    }
 private:
     enum class AhoiLogSinkType {
         ConsoleSink,
         FileSink,
         NullSink,
     };
-
 public:
     void add_console_sink();
     void add_file_sink(const std::string& base_path_and_name = "", std::size_t max_size = 1024*1024);

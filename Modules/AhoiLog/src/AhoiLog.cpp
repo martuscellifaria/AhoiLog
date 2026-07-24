@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstddef>
 #include <ctime>
+#include <exception>
 #include <iostream>
 #include <format>
 #include <print>
@@ -34,8 +35,13 @@ void AhoiLog::shutdown() {
 }
 
 AhoiLog::~AhoiLog() {
-    if (!ahoilog_shutdown_) {
-        shutdown();
+    try {
+        if (!ahoilog_shutdown_) {
+            shutdown();
+        }
+    }
+    catch (...) {
+        std::terminate();
     }
 }
 
