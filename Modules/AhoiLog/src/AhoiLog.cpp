@@ -8,13 +8,11 @@
 #include <print>
 #include <string>
 
-AhoiLog::AhoiLog(bool debug_environment, std::size_t batch_size) : 
+AhoiLog::AhoiLog() : 
     base_path_and_name_(""),
     ahoilog_shutdown_(false) {
     worker_running_ = true;
-    batch_size_ = batch_size;
     unflushed_bytes_ = 0;
-    debug_environment_ = debug_environment;
     sink_types_.clear();
     logger_thread_ = std::thread(&AhoiLog::logger_worker, this);
 }
@@ -142,22 +140,24 @@ void AhoiLog::add_null_sink() {
 
 void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
     if (ahoilog_shutdown_) return;
-    if (level != AhoiLogLevel::DEBUG || debug_environment_) {
-        size_t pos = write_pos_.fetch_add(1, std::memory_order_relaxed) & QUEUE_MASK;
-        auto& msg = log_message_queue_[pos];
-        msg.level = level;
-        if (message.size() < sizeof(msg.small) - 1) {
-            std::memcpy(msg.small, message.data(), message.size());
-            msg.small[message.size()] = '\0';
-            msg.length = message.size();
-            msg.is_large = false;
-        } else {
-            msg.large = new char[message.size() + 1];
-            std::memcpy(msg.large, message.data(), message.size());
-            msg.large[message.size()] = '\0';
-            msg.length = message.size();
-            msg.is_large = true;
-        }
+    if constexpr (!DEBUG_ENABLED) {
+	if (level == AhoiLogLevel::DEBUG) return;
+    }
+    size_t pos = write_pos_.fetch_add(1, std::memory_order_relaxed) & QUEUE_MASK;
+    auto& msg = log_message_queue_[pos];
+    msg.level = level;
+    if (message.size() < sizeof(msg.small) - 1) {
+	std::memcpy(msg.small, message.data(), message.size());
+	msg.small[message.size()] = '\0';
+	msg.length = message.size();
+	msg.is_large = false;
+    }
+    else {
+	msg.large = new char[message.size() + 1];
+	std::memcpy(msg.large, message.data(), message.size());
+	msg.large[message.size()] = '\0';
+	msg.length = message.size();
+	msg.is_large = true;
     }
 }
 

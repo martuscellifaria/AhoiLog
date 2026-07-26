@@ -1,4 +1,7 @@
 #pragma once
+#ifndef AHOI_LOG_DEBUG
+#define AHOI_LOG_DEBUG 1
+#endif
 #include <cstddef>
 #include <cstring>
 #include <format>
@@ -22,7 +25,7 @@ enum class AhoiLogLevel {
 
 class AhoiLog {
 public:
-    explicit AhoiLog(bool debug_environment = true, std::size_t batch_size = 1);
+    explicit AhoiLog();
     virtual ~AhoiLog() noexcept;
     AhoiLog(const AhoiLog&) = delete;
     AhoiLog& operator=(const AhoiLog&) = delete;
@@ -60,7 +63,8 @@ public:
 		msg.small[formatted.size()] = '\0';
 		msg.length = formatted.size();
 		msg.is_large = false;
-	    } else {
+	    }
+	    else {
 		msg.large = new char[formatted.size() + 1];
 		std::memcpy(msg.large, formatted.data(), formatted.size());
 		msg.large[formatted.size()] = '\0';
@@ -87,7 +91,6 @@ private:
     std::thread logger_thread_;
     void logger_worker();
     bool worker_running_;
-    std::size_t batch_size_;
 
     bool debug_environment_;
     std::string base_path_and_name_;
@@ -102,6 +105,7 @@ private:
     static constexpr std::size_t FLUSH_THRESHOLD = 4096;
     static constexpr size_t QUEUE_SIZE = 1024;
     static constexpr size_t QUEUE_MASK = QUEUE_SIZE - 1;
+    static constexpr bool DEBUG_ENABLED = AHOI_LOG_DEBUG;
     std::array<LogMessage, QUEUE_SIZE> log_message_queue_;
     std::atomic<size_t> write_pos_{0};
     std::atomic<size_t> read_pos_{0};
