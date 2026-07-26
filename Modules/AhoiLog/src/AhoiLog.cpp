@@ -138,8 +138,11 @@ void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
     if (level != AhoiLogLevel::DEBUG || debug_environment_) {
         std::string owned(message);
         std::lock_guard<std::mutex> lock(queue_mutex_);
+	bool was_empty = log_message_queue_.empty();
         log_message_queue_.emplace_back(level, std::move(owned));
-        cond_var_.notify_one();
+	if (was_empty) {
+	    cond_var_.notify_one();
+	}
     }
 }
 
