@@ -22,7 +22,6 @@ AhoiLog::AhoiLog(bool debug_environment, std::size_t batch_size) :
 void AhoiLog::shutdown() {
     ahoilog_shutdown_ = true;
     worker_running_ = false;
-    cond_var_.notify_all();
 
     if (logger_thread_.joinable()) {
         logger_thread_.join();
@@ -34,7 +33,7 @@ void AhoiLog::shutdown() {
     }
 }
 
-AhoiLog::~AhoiLog() {
+AhoiLog::~AhoiLog() noexcept {
     try {
         if (!ahoilog_shutdown_) {
             shutdown();
@@ -46,31 +45,39 @@ AhoiLog::~AhoiLog() {
 }
 
 void AhoiLog::logger_worker() {
-    std::vector<std::pair<AhoiLogLevel, std::string>> batch;
     while (true) {
-        std::unique_lock<std::mutex> lock(queue_mutex_);
-        cond_var_.wait(lock, [this]() {
-            return !log_message_queue_.empty() || !worker_running_;
-        });
-
-        if (!worker_running_ && log_message_queue_.empty()) {
-            break;
-        }
-
-        const size_t available = log_message_queue_.size();
-        const size_t batch_size = std::min(available, static_cast<size_t>(batch_size_));
-        batch.reserve(batch_size);
-        for (size_t i = 0; i < batch_size; ++i) {
-            batch.emplace_back(std::move(log_message_queue_.front()));
-            log_message_queue_.pop_front();
-        }
-        lock.unlock(); 
-        for (auto& [level, message] : batch) {
-            if (!message.empty()) { 
-                write_to_destination(level, message);
+        size_t local_read = read_pos_.load(std::memory_order_relaxed);
+        size_t local_write = write_pos_.load(std::memory_order_acquire);
+        
+        while (local_read != local_write) {
+            auto& msg = log_message_queue_[local_read & QUEUE_MASK];
+            std::string message;
+	    if (msg.is_large) {
+                message.assign(msg.large, msg.length);
+                delete[] msg.large;
             }
+	    else {
+                message.assign(msg.small, msg.length);
+            }
+            
+            if (!message.empty()) {
+                write_to_destination(msg.level, message);
+            }
+            
+            local_read++;
         }
-        batch.clear();
+        
+        read_pos_.store(local_read, std::memory_order_release);
+        
+	if (!worker_running_) {
+            local_write = write_pos_.load(std::memory_order_acquire);
+            if (local_read == local_write) {
+		break;
+	    }
+        }
+	else {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
     }
 }
 
@@ -136,13 +143,21 @@ void AhoiLog::add_null_sink() {
 void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
     if (ahoilog_shutdown_) return;
     if (level != AhoiLogLevel::DEBUG || debug_environment_) {
-        std::string owned(message);
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-	bool was_empty = log_message_queue_.empty();
-        log_message_queue_.emplace_back(level, std::move(owned));
-	if (was_empty) {
-	    cond_var_.notify_one();
-	}
+        size_t pos = write_pos_.fetch_add(1, std::memory_order_relaxed) & QUEUE_MASK;
+        auto& msg = log_message_queue_[pos];
+        msg.level = level;
+        if (message.size() < sizeof(msg.small) - 1) {
+            std::memcpy(msg.small, message.data(), message.size());
+            msg.small[message.size()] = '\0';
+            msg.length = message.size();
+            msg.is_large = false;
+        } else {
+            msg.large = new char[message.size() + 1];
+            std::memcpy(msg.large, message.data(), message.size());
+            msg.large[message.size()] = '\0';
+            msg.length = message.size();
+            msg.is_large = true;
+        }
     }
 }
 
