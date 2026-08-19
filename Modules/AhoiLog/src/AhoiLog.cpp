@@ -9,17 +9,16 @@
 #include <string>
 #include <cstdlib>
 
-AhoiLog::AhoiLog() 
-    : base_path_and_name_(""),
-    max_size_(1024 * 1024),
+AhoiLog::AhoiLog()
+    : unflushed_bytes_(0),
+    base_path_and_name_(""),
+    max_size_(std::size_t{1024} * std::size_t{1024}),
     current_size_(0),
-    unflushed_bytes_(0),
     sink_mask_(0) {
     const char* env_debug = std::getenv("AHOI_LOG_DEBUG");
     debug_environment_ = (env_debug != nullptr && std::string_view(env_debug) != "0");
-    
-    logger_thread_ = std::jthread([this](std::stop_token st) {
-        logger_worker(st);
+    logger_thread_ = std::jthread([this](std::stop_token st) -> void {
+        logger_worker(std::move(st));
     });
 }
 
@@ -38,11 +37,9 @@ void AhoiLog::shutdown() {
     ahoilog_shutdown_.store(true, std::memory_order_release);
     logger_thread_.request_stop();
     queue_cv_.notify_all();
-    
     if (logger_thread_.joinable()) {
         logger_thread_.join();
     }
-    
     std::lock_guard<std::mutex> file_lock(file_mutex_);
     if (file_ && file_.is_open()) {
         file_.flush();
@@ -53,21 +50,17 @@ void AhoiLog::shutdown() {
 void AhoiLog::logger_worker(std::stop_token st) {
     while (!st.stop_requested()) {
         std::deque<LogMessage> batch;
-        
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
-            queue_cv_.wait(lock, [&] {
+            queue_cv_.wait(lock, [&] -> bool {
                 return !log_message_queue_.empty() || st.stop_requested();
             });
-            
             if (log_message_queue_.empty() && st.stop_requested()) {
                 break;
             }
-            
             batch = std::move(log_message_queue_);
             log_message_queue_.clear();
         }
-        
         for (auto& msg : batch) {
             std::string message;
             if (msg.is_large) {
@@ -76,13 +69,11 @@ void AhoiLog::logger_worker(std::stop_token st) {
             else {
                 message.assign(msg.small, msg.length);
             }
-            
             if (!message.empty()) {
                 write_to_destination(msg.level, message);
             }
         }
     }
-    
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         while (!log_message_queue_.empty()) {
@@ -113,22 +104,17 @@ void AhoiLog::add_console_sink() {
 void AhoiLog::add_file_sink(const std::string& base_path_and_name, std::size_t max_size) {
     std::lock_guard<std::mutex> lock(mutex_);
     append_new_sink(AhoiLogSinkType::FileSink);
-    
     if (base_path_and_name_.empty()) {
         base_path_and_name_ = base_path_and_name;
     }
-    
     {
         std::lock_guard<std::mutex> file_lock(file_mutex_);
         if (file_ && file_.is_open()) {
             file_.close();
         }
-        
         max_size_ = max_size;
         current_size_ = 0;
-        
         current_date_ = get_current_date();
-        
         auto now = std::chrono::zoned_time(
             std::chrono::current_zone(),
             std::chrono::floor<std::chrono::minutes>(std::chrono::system_clock::now()));
@@ -151,19 +137,17 @@ void AhoiLog::set_log_options(AhoiLogSinkType sink_type,
     std::lock_guard<std::mutex> lock(mutex_);
     sink_mask_ = 0;
     append_new_sink(sink_type);
-    
     if (static_cast<uint8_t>(sink_type) & static_cast<uint8_t>(AhoiLogSinkType::FileSink)) {
         base_path_and_name_ = base_path_and_name;
         max_size_ = max_size;
-        
         std::lock_guard<std::mutex> file_lock(file_mutex_);
         if (file_ && file_.is_open()) {
             file_.close();
         }
-        
+
         current_size_ = 0;
         current_date_ = get_current_date();
-        
+
         auto now = std::chrono::zoned_time(
             std::chrono::current_zone(),
             std::chrono::floor<std::chrono::minutes>(std::chrono::system_clock::now()));
@@ -176,15 +160,19 @@ void AhoiLog::set_log_options(AhoiLogSinkType sink_type,
 }
 
 void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
-    if (ahoilog_shutdown_.load(std::memory_order_acquire)) return;
-    
-    if constexpr (!DEBUG_ENABLED) {
-        if (level == AhoiLogLevel::DEBUG) return;
+    if (ahoilog_shutdown_.load(std::memory_order_acquire)) { 
+        return;
     }
-    
+
+    if constexpr (!DEBUG_ENABLED) {
+        if (level == AhoiLogLevel::LEVEL_DEBUG) {
+            return;
+        }
+    }
+
     LogMessage msg;
     msg.level = level;
-    
+
     if (message.size() < sizeof(msg.small) - 1) {
         std::memcpy(msg.small, message.data(), message.size());
         msg.small[message.size()] = '\0';
@@ -198,7 +186,7 @@ void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
         msg.length = message.size();
         msg.is_large = true;
     }
-    
+
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
         bool was_empty = log_message_queue_.empty();
@@ -210,38 +198,37 @@ void AhoiLog::log(AhoiLogLevel level, std::string_view message) {
 }
 
 void AhoiLog::write_to_destination(AhoiLogLevel level, const std::string& message) {
-    static constexpr const char* levels[] = {
+    static constexpr std::array<std::string, 5> levels = {
         "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
     };
-    
-    const char* level_string = (static_cast<int>(level) < 5) 
+
+    const std::string level_string = (static_cast<int>(level) < 5) 
         ? levels[static_cast<int>(level)] 
         : "UNKNOWN";
-    
+
     std::string composed_message = std::format(
         "[{}] [{}] {}\n", 
         get_timestamp(), 
         level_string, 
         message
     );
-    
+
     uint8_t sink_mask;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         sink_mask = sink_mask_;
     }
-    
+
     bool has_console = (sink_mask & static_cast<uint8_t>(AhoiLogSinkType::ConsoleSink)) != 0;
     bool has_file = (sink_mask & static_cast<uint8_t>(AhoiLogSinkType::FileSink)) != 0;
     bool has_null = (sink_mask & static_cast<uint8_t>(AhoiLogSinkType::NullSink)) != 0;
-    
+
     if (has_null && !has_console && !has_file) {
         return;
     }
-    
+
     if (has_file) {
         std::lock_guard<std::mutex> file_lock(file_mutex_);
-        
         if (!file_ || !file_.is_open()) {
             if (!base_path_and_name_.empty()) {
                 current_date_ = get_current_date();
@@ -257,12 +244,8 @@ void AhoiLog::write_to_destination(AhoiLogLevel level, const std::string& messag
             current_size_ += composed_message.size();
             unflushed_bytes_ += composed_message.size();
             bool should_flush = false;
-            if (unflushed_bytes_ >= FLUSH_THRESHOLD) {
-                should_flush = true;
-            }
-            else if (level == AhoiLogLevel::CRITICAL || 
-                     level == AhoiLogLevel::ERROR || 
-                     level == AhoiLogLevel::WARNING) {
+            if (unflushed_bytes_ >= FLUSH_THRESHOLD || level == AhoiLogLevel::LEVEL_CRITICAL ||
+                     level == AhoiLogLevel::LEVEL_ERROR || level == AhoiLogLevel::LEVEL_WARNING) {
                 should_flush = true;
             }
             else if (should_rotate(composed_message.size())) {

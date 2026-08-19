@@ -1,8 +1,5 @@
 #pragma once
-#ifndef AHOI_LOG_DEBUG
-#define AHOI_LOG_DEBUG 1
-#endif
-
+#include <cstdint>
 #include <cstddef>
 #include <cstring>
 #include <format>
@@ -18,12 +15,16 @@
 #include <source_location>
 #include <utility>
 
-enum class AhoiLogLevel {
-    DEBUG,
-    INFO,
-    WARNING,
-    ERROR,
-    CRITICAL
+#ifndef AHOI_LOG_DEBUG
+#define AHOI_LOG_DEBUG 1
+#endif
+
+enum class AhoiLogLevel : uint8_t {
+    LEVEL_DEBUG,
+    LEVEL_INFO,
+    LEVEL_WARNING,
+    LEVEL_ERROR,
+    LEVEL_CRITICAL
 };
 
 enum class AhoiLogSinkType : uint8_t {
@@ -38,6 +39,8 @@ public:
     ~AhoiLog() noexcept;
     AhoiLog(const AhoiLog&) = delete;
     AhoiLog& operator=(const AhoiLog&) = delete;
+    AhoiLog(const AhoiLog&&) = delete;
+    AhoiLog& operator=(const AhoiLog&&) = delete;
     void shutdown();
 
 private:
@@ -50,16 +53,16 @@ private:
         size_t length;
         bool is_large;
 
-        LogMessage() : level(AhoiLogLevel::INFO), length(0), is_large(false) {
+        LogMessage() : level(AhoiLogLevel::LEVEL_INFO), length(0), is_large(false) {
             small[0] = '\0';
         }
-        
+
         ~LogMessage() {
             if (is_large) {
                 delete[] large;
             }
         }
-        
+
         LogMessage(LogMessage&& other) noexcept 
             : level(other.level), length(other.length), is_large(other.is_large) {
             if (other.is_large) {
@@ -74,10 +77,12 @@ private:
             other.length = 0;
             other.is_large = false;
         }
-        
+
         LogMessage& operator=(LogMessage&& other) noexcept {
             if (this != &other) {
-                if (is_large) delete[] large;
+                if (is_large) { 
+                    delete[] large;
+                }
                 level = other.level;
                 length = other.length;
                 is_large = other.is_large;
@@ -92,7 +97,7 @@ private:
             }
             return *this;
         }
-        
+
         LogMessage(const LogMessage&) = delete;
         LogMessage& operator=(const LogMessage&) = delete;
     };
@@ -100,24 +105,28 @@ private:
 public:
     void add_console_sink();
     void add_file_sink(const std::string& base_path_and_name = "", 
-                       std::size_t max_size = 1024 * 1024);
+                       std::size_t max_size = std::size_t{1024} * std::size_t{1024});
     void add_null_sink();
     void set_log_options(AhoiLogSinkType sink_type,
                          const std::string& base_path_and_name = "",
-                         std::size_t max_size = 1024 * 1024);
+                         std::size_t max_size = std::size_t{1024} * std::size_t{1024});
 
     template<typename... Args>
     void log(AhoiLogLevel level, std::format_string<Args...> fmt, Args&&... args) {
-        if (ahoilog_shutdown_.load(std::memory_order_acquire)) return;
-        
-        if constexpr (!DEBUG_ENABLED) {
-            if (level == AhoiLogLevel::DEBUG) return;
+        if (ahoilog_shutdown_.load(std::memory_order_acquire)) {
+            return;
         }
-        
+
+        if constexpr (!DEBUG_ENABLED) {
+            if (level == AhoiLogLevel::LEVEL_DEBUG) {
+                return;
+            }
+        }
+
         auto formatted = std::format(fmt, std::forward<Args>(args)...);
         LogMessage msg;
         msg.level = level;
-        
+
         if (formatted.size() < sizeof(msg.small) - 1) {
             std::memcpy(msg.small, formatted.data(), formatted.size());
             msg.small[formatted.size()] = '\0';
@@ -131,7 +140,7 @@ public:
             msg.length = formatted.size();
             msg.is_large = true;
         }
-        
+
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
             bool was_empty = log_message_queue_.empty();
@@ -141,9 +150,9 @@ public:
             }
         }
     }
-    
+
     void log(AhoiLogLevel level, std::string_view message);
-    
+
     static std::string where_am_i(std::source_location loc = std::source_location::current()) {
         return std::format("[{}:{}]", loc.file_name(), loc.line());
     }
@@ -161,25 +170,22 @@ private:
     std::mutex file_mutex_;
     std::mutex timestamp_mutex_;
     std::ofstream file_;
-    std::size_t unflushed_bytes_ = 0;
+    std::size_t unflushed_bytes_;
     std::jthread logger_thread_;
     void logger_worker(std::stop_token st);
 
     bool debug_environment_ = false;
     std::string base_path_and_name_;
-    std::size_t max_size_ = 1024 * 1024;
-    std::size_t current_size_ = 0;
+    std::size_t max_size_ = std::size_t{1024} * std::size_t{1024};
+    std::size_t current_size_;
     std::chrono::year_month_day current_date_;
     std::string cached_timestamp_;
     const std::string& get_timestamp();
     std::chrono::year_month_day get_current_date() const;
     std::chrono::sys_seconds last_timestamp_sec_;
-    
-    uint8_t sink_mask_ = 0;
-    
+    uint8_t sink_mask_;
     static constexpr std::size_t FLUSH_THRESHOLD = 4096;
     static constexpr bool DEBUG_ENABLED = AHOI_LOG_DEBUG;
-    
     std::deque<LogMessage> log_message_queue_;
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
